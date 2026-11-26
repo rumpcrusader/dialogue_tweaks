@@ -1,0 +1,13 @@
+{
+	"id": "dialogue_tweaks",
+	"name": "Dialogue Tweaks",
+	"version": "0.1.0",
+	"author": "Anon",
+	"description": "Small conversation changes. The first one lets Anon talk over a pony without erasing her line: she either yields at his first sound or finishes it, and her next reply receives a short, in-world note about the overlap.",
+	"game_version": "0.3.1-maredev",
+	"extends": [
+		"res://mods/dialogue_tweaks/ext/conversation_director.gd",
+		"res://mods/dialogue_tweaks/ext/settings_page.gd",
+		"res://mods/dialogue_tweaks/ext/voice_hud.gd"
+	]
+}
