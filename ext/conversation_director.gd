@@ -1,16 +1,13 @@
 extends "res://world/ai/conversation_director.gd"
 ## Dialogue Tweaks: talk-over prototype.
 ##
-## When Anon starts talking while a pony is audibly speaking, her line is protected.
-## "yield" takes the floor as soon as he presses or speaks and keeps the part she actually
-## said; "finish" lets her complete it. Either way the player's words are processed normally
-## and the reply for that turn gets one short, in-world note about the overlap.
+## When Anon presses or speaks while a pony is audibly speaking, she yields: stop her,
+## keep the part she actually said, and process his words normally. The reply for that
+## turn gets one short, in-world note about the overlap.
 
 const OVERLAP := preload("res://mods/dialogue_tweaks/overlap.gd")
 const MOD_SETTINGS := preload("res://mods/dialogue_tweaks/settings.gd")
 
-## "yield" or "finish". Settings → World chooses it at runtime.
-## yield takes the floor as soon as he presses/talks; finish lets her complete the line.
 const LENGTH_MARKER := "LENGTH OF WHAT YOU SAY OUT LOUD NOW:"
 const OVERLAP_FRESH_SECONDS := 120.0
 
@@ -18,10 +15,11 @@ var _pending_overlap: Dictionary = {}
 var _active_overlap: Dictionary = {}
 var _active_note := ""
 var _active_note_speaker := ""
-var _suppress_interrupt := false
 var _keep_partial := false
 var _note_in_use := false
 var _talk_over_reply_speaker := ""
+## Last-tenth tolerance: she was allowed to finish, so hold his WAV until she is idle.
+var _tolerate_release := false
 
 
 func _on_talk_pressed() -> void:
@@ -31,20 +29,10 @@ func _on_talk_pressed() -> void:
 	if not _is_audibly_speaking():
 		super()
 		return
-	if _talk_over_mode() == "yield":
-		if _yield_now("ptt"):
-			_set_talkover_mic(true)
-			return
-		super()
+	if _yield_now("ptt"):
+		_set_talkover_mic(true)
 		return
-	_capture_overlap("ptt")
-	if _pending_overlap.is_empty():
-		super()
-		return
-	_set_talkover_mic(true)
-	_suppress_interrupt = true
 	super()
-	_suppress_interrupt = false
 
 
 func _on_speech_state(value: String) -> void:
@@ -54,58 +42,24 @@ func _on_speech_state(value: String) -> void:
 	if value == "hearing" and _is_audibly_speaking():
 		# _on_talk_pressed already handled the push-to-talk press.
 		if not _pending_overlap.is_empty(): return
-		if _talk_over_mode() == "yield":
-			if _yield_now("vad"):
-				_set_talkover_mic(true)
-				return
-			super(value)
-			return
-		if _capture_overlap("vad"):
+		if _yield_now("vad"):
 			_set_talkover_mic(true)
-			_suppress_interrupt = true
-			super(value)
-			_suppress_interrupt = false
 			return
+		super(value)
+		return
 	super(value)
 
 
 func _on_utterance(wav: PackedByteArray, seconds: float, is_feedback := false) -> void:
 	_set_talkover_mic(false)
+	_pending_overlap = {}
 	if is_feedback:
 		super(wav, seconds, is_feedback)
 		return
-	if _pending_overlap.is_empty():
-		super(wav, seconds, is_feedback)
-		return
-	var record := _pending_overlap
-	_pending_overlap = {}
-	var onset := OVERLAP.wav_onset(wav)
-	var speech_started_at := -1.0
-	if bool(onset.get("ok", false)):
-		var duration := float(onset.get("duration", seconds))
-		speech_started_at = _now() - duration + float(onset.get("onset", 0.0))
-		if debug:
-			print("[dialogue_tweaks] wav onset %.3fs of %.3fs" % [float(onset.get("onset", 0.0)), duration])
-	else:
-		var error := str(onset.get("error", ""))
-		if error == "no voiced window" or error == "shorter than one window":
-			# A silent press is not an interruption: never cut her and never note it.
-			if debug: print("[dialogue_tweaks] %s; no note" % error)
-			if _is_audibly_speaking(): _held_utterance = [wav, seconds, is_feedback]
-			else: super(wav, seconds, is_feedback)
-			return
-		push_warning("[dialogue_tweaks] WAV onset unavailable: " + error)
-		speech_started_at = _now() - maxf(0.0, seconds)
-	var finalized: Dictionary = {}
-	if not bool(record.get("suppress_note", false)):
-		finalized = _finalize_record(record, speech_started_at)
-	if not finalized.is_empty():
-		if str(record.get("behaviour", _talk_over_mode())) == "yield" and _is_audibly_speaking():
-			_stop_for_overlap(str(finalized.get("cut", "")), finalized)
-		else:
-			_active_overlap = finalized
-	if _is_audibly_speaking():
-		_held_utterance = [wav, seconds, is_feedback]
+	if _tolerate_release:
+		_tolerate_release = false
+		if _is_audibly_speaking(): _held_utterance = [wav, seconds, is_feedback]
+		else: super(wav, seconds, is_feedback)
 		return
 	super(wav, seconds, is_feedback)
 
@@ -130,15 +84,10 @@ func handle_text(text: String) -> void:
 		var record := _pending_overlap
 		_pending_overlap = {}
 		var finalized := _finalize_record(record, _now())
-		if _talk_over_mode() == "yield":
-			if finalized.is_empty():
-				_held_text = text
-				return
-			_stop_for_overlap(str(finalized.get("cut", "")), finalized)
-		else:
-			if not finalized.is_empty(): _active_overlap = finalized
+		if finalized.is_empty():
 			_held_text = text
 			return
+		_stop_for_overlap(str(finalized.get("cut", "")), finalized)
 	if not _active_overlap.is_empty():
 		if float(_active_overlap.get("captured_at", -1e9)) + OVERLAP_FRESH_SECONDS < _now():
 			_active_overlap = {}
@@ -193,10 +142,8 @@ static func insert_note(base: String, note: String) -> String:
 
 
 func interrupt() -> void:
-	if _suppress_interrupt:
-		_suppress_interrupt = false
-		return
 	_set_talkover_mic(false)
+	_tolerate_release = false
 	if not _note_in_use:
 		_active_note = ""
 		_active_note_speaker = ""
@@ -224,6 +171,7 @@ func _on_speech_finished(id: String = "") -> void:
 
 func _fail(why: String) -> void:
 	_set_talkover_mic(false)
+	_tolerate_release = false
 	_talk_over_reply_speaker = ""
 	_pending_overlap = {}
 	_active_overlap = {}
@@ -234,6 +182,7 @@ func _fail(why: String) -> void:
 
 func _on_world_reopened(world_id: String) -> void:
 	_set_talkover_mic(false)
+	_tolerate_release = false
 	_talk_over_reply_speaker = ""
 	_pending_overlap = {}
 	_active_overlap = {}
@@ -244,6 +193,7 @@ func _on_world_reopened(world_id: String) -> void:
 
 func _exit_tree() -> void:
 	_set_talkover_mic(false)
+	_tolerate_release = false
 	_talk_over_reply_speaker = ""
 	_pending_overlap = {}
 	_active_overlap = {}
@@ -254,10 +204,6 @@ func _exit_tree() -> void:
 
 func _is_audibly_speaking() -> bool:
 	return state == "speaking" and _recorded and not floor_held()
-
-
-func _talk_over_mode() -> String:
-	return MOD_SETTINGS.load_mode()
 
 
 ## Only when he is looking at the pony he interrupted: she answers instead of a stale follow-up
@@ -321,7 +267,6 @@ func _capture_overlap(source: String) -> bool:
 		"turn_id": _turn_id,
 		"voice_id": _voice_id,
 		"source": source,
-		"behaviour": _talk_over_mode(),
 		"line": raw_line,
 		"duration_s": duration,
 		"duration_approximate": approximate,
@@ -362,15 +307,13 @@ func _yield_now(source: String) -> bool:
 	var speech_started_at := _now()
 	var record := _pending_overlap.duplicate(true)
 	record["source"] = source
-	record["behaviour"] = "yield"
 	var line_started := float(record.get("line_started_at", speech_started_at))
 	var duration := maxf(0.1, float(record.get("duration_s", 0.1)))
 	var fraction := clampf((speech_started_at - line_started) / duration, 0.0, 1.0)
 	if fraction >= OVERLAP.TOLERATED_LIMIT:
 		if debug: print("[dialogue_tweaks] yield tolerated %.0f%%; letting her finish" % (fraction * 100.0))
-		_pending_overlap = record
-		_pending_overlap["behaviour"] = "finish"
-		_pending_overlap["suppress_note"] = true
+		_pending_overlap = {}
+		_tolerate_release = true
 		return true
 	var finalized := _finalize_record(record, speech_started_at)
 	_pending_overlap = {}
@@ -385,7 +328,6 @@ func _yield_now(source: String) -> bool:
 
 
 func _stop_for_overlap(cut: String, record: Dictionary) -> void:
-	record["stopped"] = true
 	if debug:
 		print("[dialogue_tweaks] yield stop %s %s %.0f%% cut=\"%s\"" % [
 			_current, str(record.get("source", "")),

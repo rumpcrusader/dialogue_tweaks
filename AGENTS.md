@@ -6,36 +6,38 @@ Home: Equestria mod (`dialogue_tweaks`) for conversation behaviour. The current 
 
 When Anon presses T, speaks into the VAD, or sends typed chat while a pony is audibly speaking:
 
-- **Yield** (default): stop her immediately on the input. Keep the part she actually said in history and heard speech. Do not commit the cut line's feeling tags, farewell, transport or encounter completion.
-- **Finish**: let her finish. Keep the full line; hold Anon's WAV or text until she is idle, then process his turn.
+- She stops immediately on the input.
+- Keep the part she actually said in history and heard speech.
+- Do not commit the cut line's feeling tags, farewell, transport or encounter completion.
+- In the last tenth of her line she is allowed to finish and gets no note.
 
-Both modes:
+The reply for that turn gets one factual note in `system_prompt()`, before `LENGTH OF WHAT YOU SAY OUT LOUD NOW:`.
 
-- Put one factual note for the current turn into `system_prompt()` before `LENGTH OF WHAT YOU SAY OUT LOUD NOW:`.
 - The note uses `[Observed: ...]`, contains no numbers or developer terms, and never says the act was rude.
+- The note says she stopped and quotes the truncated line.
 - Do not put the note in Anon's text, history, `heard_speech` or world memory.
 - Do not write a talk-over world event, use `impressions.commit`, or change mood/friendship from the overlap.
-- A note is skipped in the last tenth of her line (`tolerated`).
 
 ## Addressee
 
 On a talk-over turn, the interrupted pony can answer instead of the base game's follow-up partner.
 
-- World setting: **When I look at the interrupted pony** → `She answers` / `Base game`.
+- World setting: **When I look at the interrupted pony** → `[Base game] [She answers]`.
 - `She answers`: only when the player's gaze is exactly the interrupted pony.
-- Names and “everyone” always win.
+- `Base game`: leave `addressee.gd` untouched.
+- Names and “everyone” always win in both choices.
 - Any other case keeps `addressee.gd`'s result (named > everyone > follow-up partner > gaze > nearest).
 
 ## Files
 
 - `mod.json` — extends the director, settings page and voice HUD.
-- `overlap.gd` — pure helpers: bucket, truncated quote, WAV onset, note, talk-over listener choice.
-- `ext/conversation_director.gd` — capture, yield/finish, note, microphone HUD override, addressee override.
-- `ext/settings_page.gd` — World-tab rows.
+- `overlap.gd` — pure helpers: bucket, truncated quote, note, talk-over listener choice.
+- `ext/conversation_director.gd` — capture, yield, note, microphone HUD override, addressee override.
+- `ext/settings_page.gd` — World-tab addressee row.
 - `ext/voice_hud.gd` — green mic while PTT is held during a talk-over.
 - `settings.gd` — global mod settings.
 - `tests/test_overlap.gd` — pure helpers and director helpers.
-- `tests/test_settings.gd` — World rows, persistence and extension checks.
+- `tests/test_settings.gd` — World row, persistence and extension checks.
 
 This folder is its own git repository. The parent game repository leaves it untracked; do not add it there.
 
@@ -43,10 +45,9 @@ This folder is its own git repository. The parent game repository leaves it untr
 
 Stored in `user://dialogue_tweaks.cfg`, section `talk_over`:
 
-- `mode`: `yield` or `finish`.
 - `addressing`: `looked_at_interrupted` or `base`.
 
-Defaults: `yield`, `looked_at_interrupted`.
+Default: `looked_at_interrupted` (She answers).
 
 ## Build and run
 
@@ -74,9 +75,10 @@ godot --headless --path <project> --script res://mods/dialogue_tweaks/tests/test
 - Edit only files under `res://mods/dialogue_tweaks/`.
 - The note is current-turn only and is inserted before the solo length rule.
 - `_note_in_use` guards the note through the base `handle_text()` interrupt.
-- `_stop_for_overlap()` sets `stopped`; the note reports the actual outcome.
+- `_stop_for_overlap()` keeps the truncated line and note; its note always reports that she stopped.
 - Do not clear `_active_overlap` when her line finishes; her finish releases the held input.
-- Clear `_pending_overlap`, `_active_overlap`, `_active_note`, `_talk_over_reply_speaker` on fail, world reopen and exit.
+- `_tolerate_release` holds Anon's WAV while she finishes the last tenth; clear it on utterance, interrupt, failure, world reopen and exit.
+- Clear `_pending_overlap`, `_active_overlap`, `_active_note`, `_talk_over_reply_speaker` on failure, world reopen and exit.
 - `pick_listener()` only replaces the base result when the talk-over hint is set, the setting is `looked_at_interrupted`, the base reason is not `named`/`everyone`, and gaze equals the interrupted pony.
 - No `class_name`; preload mod scripts by path so they work from a `.pck`.
 - Do not ship `.uid` files or developer docs in the pack.
@@ -84,6 +86,6 @@ godot --headless --path <project> --script res://mods/dialogue_tweaks/tests/test
 ## Known limits
 
 - Group and multi-beat replies get no group-prompt note; solo first.
-- Speaker echo can trigger VAD or the WAV scan.
+- Speaker echo can trigger VAD.
 - The base follow-up window is 20 seconds (40 if she asked a question) within 8 m.
-- No saved mod state; settings are global, not per world.
+- No saved mod state; the addressee choice is global, not per world.

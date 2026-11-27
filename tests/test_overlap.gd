@@ -11,11 +11,10 @@ var _failures := 0
 func _initialize() -> void:
 	_check_bucket()
 	_check_truncation()
-	_check_wav()
 	_check_note()
 	_check_listener()
 	_check_extension()
-	_check_utterance_hold()
+	_check_tolerated_hold()
 	if _failures == 0:
 		print("TEST_OVERLAP ok")
 		quit(0)
@@ -60,53 +59,23 @@ func _check_truncation() -> void:
 	_check(long_cut.length() <= OVERLAP.QUOTE_MAX + 2, "long quote cap")
 
 
-func _check_wav() -> void:
-	var rate := 16000
-	var samples := PackedFloat32Array()
-	for i in int(rate * 0.5): samples.append(0.0)
-	for i in int(rate * 0.2): samples.append(sin(TAU * 440.0 * float(i) / rate) * 0.5)
-	var onset := OVERLAP.wav_onset(_wav(samples, rate))
-	_check(bool(onset.get("ok", false)), "wav onset ok")
-	_check(absf(float(onset.get("onset", -1.0)) - 0.5) < 0.06, "wav onset near 0.5 s")
-	var quiet := PackedFloat32Array()
-	for i in int(rate * 0.5): quiet.append(0.0)
-	for i in int(rate * 0.2): quiet.append(sin(TAU * 440.0 * float(i) / rate) * 0.012)
-	var quiet_onset := OVERLAP.wav_onset(_wav(quiet, rate))
-	_check(bool(quiet_onset.get("ok", false)), "quiet wav onset ok")
-	_check(absf(float(quiet_onset.get("onset", -1.0)) - 0.5) < 0.06, "quiet wav onset near 0.5 s")
-	var silent := PackedFloat32Array()
-	for i in int(rate * 0.5): silent.append(0.0)
-	_check(not bool(OVERLAP.wav_onset(_wav(silent, rate)).get("ok", true)), "silent wav has no onset")
-	_check(not bool(OVERLAP.wav_onset("nope".to_ascii_buffer()).get("ok", true)), "malformed wav rejected")
-
-
 func _check_note() -> void:
-	var finish := {
+	var note := OVERLAP.note_for({
 		"bucket": "mid_sentence",
-		"behaviour": "finish",
 		"cut": "Oh, darling, I was just thinking-",
 		"listener_id": "player",
 		"source": "ptt",
-	}
-	var note := OVERLAP.note_for(finish, "Anon")
+	}, "Anon")
 	_check(note.begins_with("[Observed: "), "note label")
-	_check(note.contains("kept going and finished"), "finish sentence")
-	_check(note.contains("\"Oh, darling, I was just thinking-\""), "finish quote")
+	_check(note.contains("stopped when he spoke up"), "yield sentence")
+	_check(note.contains("\"Oh, darling, I was just thinking-\""), "yield quote")
 	_check(RegEx.create_from_string("[0-9]").search(note) == null, "note has no digits")
-	var yield_note := OVERLAP.note_for({
-		"bucket": "immediate", "behaviour": "yield", "stopped": true, "cut": "Oh-", "listener_id": "player", "source": "ptt",
-	}, "Anon")
-	_check(yield_note.contains("stopped when he spoke up"), "yield sentence")
-	var missed_yield := OVERLAP.note_for({
-		"bucket": "mid_sentence", "behaviour": "yield", "cut": "Oh, darling-", "listener_id": "player", "source": "ptt",
-	}, "Anon")
-	_check(missed_yield.contains("kept going and finished"), "yield that missed the onset reports finish")
 	var bare := OVERLAP.note_for({
-		"bucket": "immediate", "behaviour": "finish", "cut": "", "listener_id": "player", "source": "ptt",
+		"bucket": "immediate", "cut": "", "listener_id": "player", "source": "ptt",
 	}, "Anon")
 	_check(bare.contains("barely started"), "barely started")
 	var ambient := OVERLAP.note_for({
-		"bucket": "almost_done", "behaviour": "finish", "cut": "Nearly there-",
+		"bucket": "almost_done", "cut": "Nearly there-",
 		"listener_id": "bon_bon", "listener_name": "Bon Bon", "source": "vad",
 		"spoken_prefix_has_question": true,
 	}, "Anon")
@@ -114,7 +83,7 @@ func _check_note() -> void:
 	_check(ambient.contains("already asked him a question"), "spoken question")
 	_check(ambient.contains("may not have meant to interrupt"), "vad caution")
 	_check(OVERLAP.note_for({
-		"bucket": "tolerated", "behaviour": "finish", "cut": "Anything-", "listener_id": "player",
+		"bucket": "tolerated", "cut": "Anything-", "listener_id": "player",
 	}, "Anon").is_empty(), "tolerated has no note")
 
 
@@ -168,7 +137,7 @@ func _check_extension() -> void:
 	_check(absf(float(captured.get("duration_s", 0.0)) - 4.0) < 0.001, "capture duration")
 	_check(str(captured.get("source", "")) == "ptt", "capture source")
 	node.free()
-	var note := "[Observed: Anon spoke while you were still talking. You kept going and finished what you were saying. At that moment, you had said: \"Oh, darling, I was just thinking-\".]"
+	var note := "[Observed: Anon spoke while you were still talking. You stopped when he spoke up. At that moment, you had said: \"Oh, darling, I was just thinking-\".]"
 	var base := "HEAD\n\nSituation: here\n\nLENGTH OF WHAT YOU SAY OUT LOUD NOW: tail"
 	var prompt: String = DIRECTOR.insert_note(base, note)
 	_check(prompt.find(note) >= 0, "note in prompt")
@@ -178,81 +147,13 @@ func _check_extension() -> void:
 	director.free()
 
 
-func _check_utterance_hold() -> void:
+func _check_tolerated_hold() -> void:
 	var director = DIRECTOR.new()
 	director.state = "speaking"
 	director._recorded = true
-	var now: float = DIRECTOR._now()
-	var samples := PackedFloat32Array()
-	for i in int(16000 * 0.5): samples.append(0.0)
-	for i in int(16000 * 0.2): samples.append(sin(TAU * 440.0 * float(i) / 16000.0) * 0.5)
-	var wav := _wav(samples, 16000)
-	var cues := [
-		{"start": 0.0, "end_char": 3},
-		{"start": 0.4, "end_char": 11},
-		{"start": 0.9, "end_char": 24},
-		{"start": 1.4, "end_char": 36},
-	]
-	director._pending_overlap = {
-		"line": "Oh, darling, I was just thinking about that new fabric—",
-		"line_started_at": now - 1.0, "line_ends_at": now + 3.0, "duration_s": 4.0,
-		"word_cues": cues, "captured_at": now, "behaviour": "finish", "source": "ptt",
-	}
-	director._active_overlap = {}
+	director._tolerate_release = true
 	director._held_utterance = []
-	director._on_utterance(wav, 0.7)
-	_check(not director._active_overlap.is_empty(), "utterance sets active overlap")
-	_check(director._held_utterance.size() == 3, "utterance holds while she speaks")
-	_check(str(director._active_overlap.get("bucket", "")) == "immediate", "utterance bucket")
-	director._pending_overlap = {
-		"line": "Oh, darling, I was just thinking about that new fabric—",
-		"line_started_at": now - 3.85, "line_ends_at": now + 0.15, "duration_s": 4.0,
-		"word_cues": cues, "captured_at": now, "behaviour": "finish", "source": "ptt",
-	}
-	director._active_overlap = {}
-	director._held_utterance = []
-	director._on_utterance(wav, 0.7)
-	_check(director._active_overlap.is_empty(), "utterance tolerates 90%+")
-	_check(director._held_utterance.size() == 3, "tolerated still holds while she speaks")
-	var silent := PackedFloat32Array()
-	for i in int(16000 * 0.5): silent.append(0.0)
-	director._pending_overlap = {
-		"line": "Oh, darling, I was just thinking about that new fabric—",
-		"line_started_at": now - 1.0, "line_ends_at": now + 3.0, "duration_s": 4.0,
-		"word_cues": cues, "captured_at": now, "behaviour": "finish", "source": "ptt",
-	}
-	director._active_overlap = {}
-	director._held_utterance = []
-	director._on_utterance(_wav(silent, 16000), 0.5)
-	_check(director._active_overlap.is_empty(), "silence makes no note")
-	_check(director._held_utterance.size() == 3, "silence still holds while she speaks")
+	director._on_utterance(PackedByteArray(), 0.5)
+	_check(director._held_utterance.size() == 3, "tolerated release holds while she speaks")
+	_check(not director._tolerate_release, "tolerated release remembers once")
 	director.free()
-
-
-func _wav(samples: PackedFloat32Array, rate: int) -> PackedByteArray:
-	var pcm := PackedByteArray()
-	pcm.resize(samples.size() * 2)
-	for i in samples.size():
-		pcm.encode_s16(i * 2, int(clampf(samples[i], -1.0, 1.0) * 32767.0))
-	var out := PackedByteArray()
-	out.append_array("RIFF".to_ascii_buffer())
-	out.resize(8)
-	out.encode_u32(4, 36 + pcm.size())
-	out.append_array("WAVEfmt ".to_ascii_buffer())
-	var fmt := PackedByteArray()
-	fmt.resize(20)
-	fmt.encode_u32(0, 16)
-	fmt.encode_u16(4, 1)
-	fmt.encode_u16(6, 1)
-	fmt.encode_u32(8, rate)
-	fmt.encode_u32(12, rate * 2)
-	fmt.encode_u16(16, 2)
-	fmt.encode_u16(18, 16)
-	out.append_array(fmt)
-	out.append_array("data".to_ascii_buffer())
-	var size := PackedByteArray()
-	size.resize(4)
-	size.encode_u32(0, pcm.size())
-	out.append_array(size)
-	out.append_array(pcm)
-	return out

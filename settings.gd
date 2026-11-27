@@ -3,27 +3,9 @@ extends RefCounted
 
 const PATH := "user://dialogue_tweaks.cfg"
 const SECTION := "talk_over"
-const KEY := "mode"
-const DEFAULT := "yield"
-const MODES := ["yield", "finish"]
 const ADDRESSING_KEY := "addressing"
 const ADDRESSING_DEFAULT := "looked_at_interrupted"
 const ADDRESSING_MODES := ["looked_at_interrupted", "base"]
-
-
-static func load_mode() -> String:
-	var config := ConfigFile.new()
-	if config.load(PATH) != OK: return DEFAULT
-	var mode := str(config.get_value(SECTION, KEY, DEFAULT))
-	return mode if mode in MODES else DEFAULT
-
-
-static func save_mode(mode: String) -> void:
-	if mode not in MODES: return
-	var config := ConfigFile.new()
-	config.load(PATH)
-	config.set_value(SECTION, KEY, mode)
-	config.save(PATH)
 
 
 static func load_addressing() -> String:
