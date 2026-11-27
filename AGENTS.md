@@ -61,7 +61,7 @@ Godot 4.5. Run from this folder or by path:
 
 `build.sh` needs `godot`, `git`, `python3`, `tar`. It packs tracked and untracked non-ignored files, excluding tests, CI, scripts, docs, logs, `.pck` and `.uid`, and writes a `.sha256` beside the pack.
 
-`run.sh` filters `[typing_lock]` lines and writes `last-run.log`. It forces desktop (`--xr-mode off`); run Godot directly for VR.
+`run.sh` writes `last-run.log`. It forces desktop (`--xr-mode off`); run Godot directly for VR.
 
 Tests:
 

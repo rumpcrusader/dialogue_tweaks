@@ -25,7 +25,6 @@ LOG="$ROOT/last-run.log"
 echo "Starting Home: Equestria with dialogue_tweaks from source..."
 printf 'Run log: %s\n' "$LOG"
 
-# typing_lock is an installed mod outside this repository; its per-frame lines bury the run log.
 godot --xr-mode off --display-driver "$display" --path "$PROJECT_ROOT" \
 	-- --mod-src dialogue_tweaks "$@" \
-	2>&1 | sed -u '/^\[typing_lock\]/d' | tee "$LOG"
+	2>&1 | tee "$LOG"
