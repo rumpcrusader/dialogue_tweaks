@@ -6,6 +6,7 @@
 #
 # No parent game project, asset import, manifest verifier or network. The pack contains only the
 # mod's runtime tree, a generated mod.built.json marker and a minimal Godot project used to pack it.
+# A .sha256 is written beside the pack.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -83,7 +84,7 @@ if [ ! -s "$FILES" ]; then
 fi
 tar --null -C "$ROOT" \
 	--exclude='tests/*' --exclude='build.sh' --exclude='run.sh' --exclude='AGENTS.md' --exclude='.gitignore' \
-	--exclude='dist/*' --exclude='*.pck' --exclude='*.uid' --exclude='*.log' \
+	--exclude='.github/*' --exclude='dist/*' --exclude='*.pck' --exclude='*.uid' --exclude='*.log' \
 	-cf - --files-from="$FILES" \
 	| tar -C "$MOD" -xf -
 rm -f "$FILES"
@@ -144,3 +145,9 @@ func _walk(dir: String, files: Array[String]) -> void:
 GD
 
 godot --headless --path "$STAGE" --script res://pack.gd -- --out "$OUT"
+
+checksum() {
+	if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1"; else shasum -a 256 "$1"; fi
+}
+( cd "$(dirname "$OUT")" && checksum "$(basename "$OUT")" > "$(basename "$OUT").sha256" )
+echo "Checksum: $OUT.sha256"

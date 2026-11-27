@@ -38,6 +38,7 @@ On a talk-over turn, the interrupted pony can answer instead of the base game's 
 - `settings.gd` — global mod settings.
 - `tests/test_overlap.gd` — pure helpers and director helpers.
 - `tests/test_settings.gd` — World row, persistence and extension checks.
+- `.github/workflows/build.yml` — GitHub build and release workflow.
 
 This folder is its own git repository. The parent game repository leaves it untracked; do not add it there.
 
@@ -58,7 +59,7 @@ Godot 4.5. Run from this folder or by path:
 ./run.sh                           # game from source, tees to last-run.log
 ```
 
-`build.sh` needs `godot`, `git`, `python3`, `tar`. It packs tracked and untracked non-ignored files, excluding tests, scripts, docs, logs, `.pck` and `.uid`.
+`build.sh` needs `godot`, `git`, `python3`, `tar`. It packs tracked and untracked non-ignored files, excluding tests, CI, scripts, docs, logs, `.pck` and `.uid`, and writes a `.sha256` beside the pack.
 
 `run.sh` filters `[typing_lock]` lines and writes `last-run.log`. It forces desktop (`--xr-mode off`); run Godot directly for VR.
 
@@ -69,6 +70,20 @@ XDG_DATA_HOME=/tmp/dialogue-tweaks-settings godot --headless --path <project> \
   --script res://mods/dialogue_tweaks/tests/test_settings.gd -- --mod-src dialogue_tweaks
 godot --headless --path <project> --script res://mods/dialogue_tweaks/tests/test_overlap.gd
 ```
+
+## Release
+
+The mod is its own GitHub repository. CI builds the pack on every push and pull request. Push an
+annotated tag matching `mod.json` to publish a release:
+
+```bash
+git tag -a v0.1.0 -m "dialogue_tweaks 0.1.0"
+git push origin main
+git push origin v0.1.0
+```
+
+The tag run builds `dist/dialogue_tweaks-<version>.pck` plus its `.sha256` and attaches both to a
+GitHub Release. There is no changelog and no tag/version check. The agent never pushes or tags.
 
 ## Invariants
 
@@ -81,7 +96,7 @@ godot --headless --path <project> --script res://mods/dialogue_tweaks/tests/test
 - Clear `_pending_overlap`, `_active_overlap`, `_active_note`, `_talk_over_reply_speaker` on failure, world reopen and exit.
 - `pick_listener()` only replaces the base result when the talk-over hint is set, the setting is `looked_at_interrupted`, the base reason is not `named`/`everyone`, and gaze equals the interrupted pony.
 - No `class_name`; preload mod scripts by path so they work from a `.pck`.
-- Do not ship `.uid` files or developer docs in the pack.
+- Do not ship `.uid` files, developer docs or CI files in the pack.
 
 ## Known limits
 
